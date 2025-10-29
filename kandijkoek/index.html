@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Het kandijkoek admin scherm, want ja ik wil ook ergens admin van zijn.</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../styles.css?v=20251009">
+</head>
+<body>
+    <audio id="bgAudio" src="../tune/theme.m4a" preload="auto" loop muted playsinline></audio>
+    <button id="muteBtn" class="secondary mute-btn" aria-pressed="false">🔊</button>
+    <header class="app-header">
+        <h1>Klusclub leden:</h1>
+    </header>
+
+    <main class="app-main">
+        <!-- Wheel route stub (kept hidden; canvas not present on this page) -->
+        <section class="wheel-section route route-home" data-route="/" hidden>
+        </section>
+
+        <!-- Names route visible on this page -->
+        <section class="names-section route route-names" data-route="/kandijkoek">
+            <h2>Namen:</h2>
+            <form id="nameForm" autocomplete="off">
+                <input id="nameInput" type="text" placeholder="Voeg hier een klusclub lid toe" required>
+                <button type="submit" class="primary">Voeg toe</button>
+                <button id="clearAll" type="button" class="danger">NIEMAND IS MEER KLUSCLUB!</button>
+            </form>
+            <div class="unban-all-controls">
+                <div class="unban-all-toggle">
+                    <label class="toggle">
+                        <input id="unbanAllToggle" type="checkbox">
+                        <span class="label">Alle gebande namen unbanen</span>
+                    </label>
+                </div>
+            </div>
+            <ul id="nameList" class="name-list" aria-label="Current names"></ul>
+            <details class="import-export">
+                <summary>Import / Export</summary>
+                <div class="row">
+                    <button id="exportBtn" type="button" class="secondary">Export JSON</button>
+                    <label class="file">
+                        <input id="importFile" type="file" accept="application/json">
+                        <span>Import JSON…</span>
+                    </label>
+                </div>
+            </details>
+            <div class="history-actions">
+                <button id="clearHistoryBtn" type="button" class="secondary">Geschiedenis leegmaken</button>
+                <button id="resetPostWinBtn" type="button" class="secondary">Reset spel</button>
+                <button id="revertLastSpinBtn" type="button" class="secondary">Niet aanwezig (laatste spin terugdraaien)</button>
+            </div>
+            
+        <div class="auto-reset-section">
+            <h3>Automatische reset:</h3>
+            <div class="auto-reset-controls">
+                <label class="toggle">
+                    <input id="autoResetToggle" type="checkbox">
+                    <span class="label">Automatische reset inschakelen</span>
+                </label>
+                <div class="auto-reset-settings">
+                    <div class="row">
+                        <label for="autoResetDay">Dag:</label>
+                        <select id="autoResetDay">
+                            <option value="0">Zondag</option>
+                            <option value="1">Maandag</option>
+                            <option value="2">Dinsdag</option>
+                            <option value="3">Woensdag</option>
+                            <option value="4">Donderdag</option>
+                            <option value="5">Vrijdag</option>
+                            <option value="6">Zaterdag</option>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <label for="autoResetTime">Tijd:</label>
+                        <input id="autoResetTime" type="time" value="13:00">
+                    </div>
+                    <div class="auto-reset-status" id="autoResetStatus"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="debug-section">
+            <h3>Debug opties:</h3>
+            <div class="debug-controls">
+                <label class="toggle">
+                    <input id="cookieConsentToggle" type="checkbox">
+                    <span class="label">Cookie-melding uitschakelen</span>
+                </label>
+            </div>
+        </div>
+        </section>
+
+        <!-- Full history on admin page -->
+        <aside class="history-pane" aria-label="Volledige geschiedenis">
+            <h3>Volledige geschiedenis:</h3>
+            <ul id="historyListFull" class="history-list"></ul>
+        </aside>
+    </main>
+
+    <footer class="app-footer">
+        <span>Voor vragen: Mail naar <a style="color: orange;" href="mailto:koekenrad@stokperdje.nl">koekenrad@stokperdje.nl</a></span>
+    </footer>
+
+    <!-- Auth Modal for /kandijkoek (duplicated here for direct loads) -->
+    <div id="authModal" class="auth-modal" hidden aria-modal="true" role="dialog" aria-labelledby="authTitle">
+        <div class="auth-modal-content">
+            <h2 id="authTitle" class="auth-title">Beveiligde pagina</h2>
+            <p class="auth-desc">Voer het wachtwoord in om namen te beheren.</p>
+            <form id="authForm" autocomplete="off">
+                <input id="authInput" type="password" placeholder="Wachtwoord" required>
+                <div class="auth-actions">
+                    <button id="authSubmit" type="submit" class="primary">Login</button>
+                    <button id="authCancel" type="button" class="secondary">Annuleren</button>
+                </div>
+                <div id="authError" class="auth-error" aria-live="polite" hidden>Onjuist wachtwoord</div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Clear History Auth Modal -->
+    <div id="clearHistoryAuthModal" class="auth-modal" hidden aria-modal="true" role="dialog" aria-labelledby="clearHistoryAuthTitle">
+        <div class="auth-modal-content">
+            <h2 id="clearHistoryAuthTitle" class="auth-title">Geschiedenis wissen</h2>
+            <p class="auth-desc">Voer het wachtwoord in om de geschiedenis te wissen.</p>
+            <form id="clearHistoryAuthForm" autocomplete="off">
+                <input id="clearHistoryAuthInput" type="password" placeholder="Wachtwoord" required>
+                <div class="auth-actions">
+                    <button id="clearHistoryAuthSubmit" type="submit" class="primary">Wissen</button>
+                    <button id="clearHistoryAuthCancel" type="button" class="secondary">Annuleren</button>
+                </div>
+                <div id="clearHistoryAuthError" class="auth-error" aria-live="polite" hidden>Onjuist wachtwoord</div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Winner Popup Modal (duplicated here for direct loads) -->
+    <div id="winnerModal" class="winner-modal" hidden>
+        <div class="winner-modal-content">
+            <div class="winner-celebration">🎉</div>
+            <h2 class="winner-title">De koekgoden hebben gesproken!</h2>
+            <div class="winner-name" id="winnerName"></div>
+            <div class="winner-message" id="winnerMessage"></div>
+            <div class="winner-actions">
+                <button id="closeWinnerModal" class="primary">Sluiten</button>
+                <button id="revertFromPopupBtn" class="danger">Niet aanwezig (terugdraaien)</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../app.js?v=20251009"></script>
+</body>
+</html>
+
+

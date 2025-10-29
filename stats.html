@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statistieken - Koekenrad</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=20251009">
+</head>
+<body>
+    <audio id="bgAudio" src="tune/theme.m4a" preload="auto" loop muted playsinline></audio>
+    <button id="muteBtn" class="secondary mute-btn" aria-pressed="false">🔊</button>
+    <header class="app-header">
+        <h1>Statistieken</h1>
+    </header>
+
+    <main class="app-main">
+        <section class="names-section" style="width:100%">
+            <h2>Statistieken</h2>
+            <div style="margin-top:0">
+                <button id="backToWheelBtn" class="primary">← Terug naar het rad</button>
+            </div>
+            
+            <!-- Totaal aantal spins -->
+            <div style="margin-top:16px;padding:12px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px">
+                <h3 style="margin:0 0 8px 0;font-size:1rem;color:var(--text)">Totaal aantal spins</h3>
+                <div id="totalSpins" style="font-size:1.5rem;font-weight:600;color:var(--accent)">0</div>
+            </div>
+
+            <!-- Bovenste rij als grid met 2 losse cells -->
+            <div style="display:grid;grid-template-columns: minmax(280px, 2fr) minmax(240px, 1fr);gap:16px;align-items:start;margin-top:16px">
+                <!-- Winsten per naam (linker cell) -->
+                <div style="min-width:280px;padding:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px">
+                    <h3 style="margin:0 0 8px 0;font-size:1rem;color:var(--text)">Winsten per naam</h3>
+                    <div style="overflow:auto;margin-top:8px">
+                        <table id="statsTable" style="width:100%;border-collapse:collapse">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.12)">Naam</th>
+                                    <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.12)">Aantal gewonnen</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Langste droogte (rechter cell) -->
+                <div style="min-width:240px;padding:16px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.08);border-radius:10px;display:flex;flex-direction:column;justify-content:center">
+                    <h3 style="margin:0 0 8px 0;font-size:1rem;color:var(--text)">Langst zonder winst</h3>
+                    <div id="droughtName" style="font-size:1.6rem;font-weight:700;color:var(--accent)">-</div>
+                    <div id="droughtInfo" style="margin-top:6px;color:var(--muted)">-</div>
+                </div>
+            </div>
+
+            <!-- Seizoensstatistieken per jaar -->
+            <div style="margin-top:16px">
+                <h3 style="margin:0 0 8px 0;font-size:1rem;color:var(--text)">Seizoensstatistieken per jaar</h3>
+                <div style="overflow:auto;margin-top:8px">
+                    <table id="yearlyStatsTable" style="width:100%;border-collapse:collapse">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;padding:8px;border-bottom:1px solid rgba(255,255,255,.12)">Jaar</th>
+                                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.12)">Aantal spins</th>
+                                <th style="text-align:right;padding:8px;border-bottom:1px solid rgba(255,255,255,.12)">Unieke winnaars</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+    (function(){
+      // Back to wheel button
+      const backToWheelBtn = document.getElementById('backToWheelBtn');
+      if (backToWheelBtn) {
+        backToWheelBtn.addEventListener('click', () => {
+          window.location.href = 'index.html';
+        });
+      }
+      function loadHistory(){
+        try{
+          const saved = localStorage.getItem('wheel:history');
+          const arr = saved ? JSON.parse(saved) : [];
+          return Array.isArray(arr) ? arr : [];
+        }catch(_e){ return []; }
+      }
+
+      function loadNames(){
+        try{
+          const saved = localStorage.getItem('wheel:names');
+          const arr = saved ? JSON.parse(saved) : [];
+          return Array.isArray(arr) ? arr.filter(n => typeof n === 'string' && n.trim().length) : [];
+        }catch(_e){ return []; }
+      }
+
+      const history = loadHistory();
+      const names = loadNames();
+
+      // Totaal aantal spins
+      const totalSpins = history.length;
+      document.getElementById('totalSpins').textContent = totalSpins;
+
+      // Telt per winnaar
+      const counts = new Map();
+      for (const item of history){
+        if (!item || typeof item.who !== 'string') continue;
+        const name = item.who;
+        counts.set(name, (counts.get(name) || 0) + 1);
+      }
+
+      // Voeg alle huidige namen toe met 0 als ze nog niet gewonnen hebben
+      for (const n of names){
+        if (!counts.has(n)) counts.set(n, 0);
+      }
+
+      const rows = Array.from(counts.entries())
+        .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+      // Render winsten per naam tabel
+      const tbody = document.querySelector('#statsTable tbody');
+      tbody.innerHTML = '';
+      if (rows.length === 0){
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = 'Nog geen winnaars in de geschiedenis.';
+        td.style.padding = '10px';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+      } else {
+        for (const [name, count] of rows){
+          const tr = document.createElement('tr');
+          const tdName = document.createElement('td');
+          tdName.textContent = name;
+          tdName.style.padding = '8px';
+          const tdCount = document.createElement('td');
+          tdCount.textContent = String(count);
+          tdCount.style.padding = '8px';
+          tdCount.style.textAlign = 'right';
+          tr.appendChild(tdName);
+          tr.appendChild(tdCount);
+          tbody.appendChild(tr);
+        }
+      }
+
+      // Langste droogte berekenen (nooit gewonnen telt als langst) + ties tonen
+      const lastWinPerName = new Map();
+      for (const item of history){
+        if (!item || typeof item.who !== 'string' || !item.when) continue;
+        const when = Number(item.when);
+        if (!Number.isFinite(when)) continue;
+        lastWinPerName.set(item.who, Math.max(lastWinPerName.get(item.who) || 0, when));
+      }
+
+      const now = Date.now();
+      const neverWonNames = [];
+      const droughtWithDays = []; // { name, days }
+      for (const n of names){
+        if (!lastWinPerName.has(n)){
+          neverWonNames.push(n);
+        } else {
+          const days = Math.floor((now - lastWinPerName.get(n)) / (1000*60*60*24));
+          droughtWithDays.push({ name: n, days });
+        }
+      }
+
+      const droughtNameEl = document.getElementById('droughtName');
+      const droughtInfoEl = document.getElementById('droughtInfo');
+
+      if (names.length === 0){
+        droughtNameEl.textContent = '-';
+        droughtInfoEl.textContent = 'geen namen gevonden';
+      } else if (neverWonNames.length > 0){
+        // Eén of meerdere nooit gewonnen → toon allemaal
+        droughtNameEl.textContent = neverWonNames.join(', ');
+        droughtInfoEl.textContent = neverWonNames.length === 1
+          ? 'heeft nog nooit gewonnen'
+          : 'hebben nog nooit gewonnen';
+      } else if (droughtWithDays.length > 0){
+        const maxDays = Math.max(...droughtWithDays.map(x => x.days));
+        const tied = droughtWithDays.filter(x => x.days === maxDays).map(x => x.name);
+        droughtNameEl.textContent = tied.join(', ');
+        droughtInfoEl.textContent = tied.length === 1
+          ? `laatste winst: ${maxDays} dag(en) geleden`
+          : `gedeelde droogte: ${maxDays} dag(en) sinds laatste winst`;
+      } else {
+        droughtNameEl.textContent = '-';
+        droughtInfoEl.textContent = 'geen data beschikbaar';
+      }
+
+      // Seizoensstatistieken per jaar
+      const yearlyStats = new Map();
+      for (const item of history){
+        if (!item || typeof item.who !== 'string' || !item.when) continue;
+        try {
+          const date = new Date(item.when);
+          const year = date.getFullYear();
+          if (!yearlyStats.has(year)) {
+            yearlyStats.set(year, { spins: 0, winners: new Set() });
+          }
+          const yearData = yearlyStats.get(year);
+          yearData.spins++;
+          yearData.winners.add(item.who);
+        } catch(_e) {}
+      }
+
+      // Render jaarlijkse statistieken
+      const yearlyRows = Array.from(yearlyStats.entries())
+        .sort((a,b) => b[0] - a[0]); // Nieuwste jaar eerst
+
+      const yearlyTbody = document.querySelector('#yearlyStatsTable tbody');
+      yearlyTbody.innerHTML = '';
+      if (yearlyRows.length === 0){
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.textContent = 'Nog geen spins in de geschiedenis.';
+        td.style.padding = '10px';
+        tr.appendChild(td);
+        yearlyTbody.appendChild(tr);
+      } else {
+        for (const [year, data] of yearlyRows){
+          const tr = document.createElement('tr');
+          
+          const tdYear = document.createElement('td');
+          tdYear.textContent = String(year);
+          tdYear.style.padding = '8px';
+          
+          const tdSpins = document.createElement('td');
+          tdSpins.textContent = String(data.spins);
+          tdSpins.style.padding = '8px';
+          tdSpins.style.textAlign = 'right';
+          
+          const tdWinners = document.createElement('td');
+          tdWinners.textContent = String(data.winners.size);
+          tdWinners.style.padding = '8px';
+          tdWinners.style.textAlign = 'right';
+          
+          tr.appendChild(tdYear);
+          tr.appendChild(tdSpins);
+          tr.appendChild(tdWinners);
+          yearlyTbody.appendChild(tr);
+        }
+      }
+    })();
+    </script>
+</body>
+</html>
+
+

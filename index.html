@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koekenrad</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=20251009">
+</head>
+<body>
+    <audio id="bgAudio" src="tune/theme.m4a" preload="auto" loop muted playsinline></audio>
+    <button id="muteBtn" class="secondary mute-btn" aria-pressed="false">🔊</button>
+    <header class="app-header">
+        <h1>Vraag de koekgoden om een slachtoffer te kiezen:</h1>
+    </header>
+
+    <main class="app-main">
+        <section class="wheel-section route route-home" data-route="/">
+            <div class="wheel-layout">
+                <div class="side-controls">
+                    <button id="spinButton" class="primary tall">Start!</button>
+                    <button id="randomKoekBtn" class="secondary tall" hidden>Random Koeken Pagina</button>
+                    <button id="statsBtn" class="secondary tall" hidden>Statistieken</button>
+                    <button id="suggestionsBtn" class="secondary tall" hidden>Suggesties voor <span id="suggestionsWinnerName"></span></button>
+                </div>
+                <div class="wheel-canvas" style="min-width:0;">
+                    <canvas id="wheelCanvas" width="500" height="500" aria-label="Names wheel" role="img"></canvas>
+                    <div id="winner" class="winner" aria-live="polite" style="display:none;"></div>
+                    <!-- Big message that replaces the wheel area when locked -->
+                    <div id="postWinMessage" class="postwin-message" aria-live="polite" style="max-width:100%;width:100%;display:none;"></div>
+                </div>
+                <aside class="history-pane" aria-label="Winners history">
+                    <h3>Laatst geofferd:</h3>
+                    <ul id="historyList" class="history-list"></ul>
+                </aside>
+            </div>
+        </section>
+
+        <section class="names-section route route-names" data-route="/kandijkoek" hidden>
+            <h2>Names</h2>
+            <div class="unban-all-controls">
+                <label class="toggle unban-all-toggle">
+                    <input id="unbanAllToggle" type="checkbox">
+                    <span class="label">Unban All Names</span>
+                </label>
+            </div>
+            <form id="nameForm" autocomplete="off">
+                <input id="nameInput" type="text" placeholder="Add a name" required>
+                <button type="submit" class="primary">Add</button>
+                <button id="clearAll" type="button" class="danger">Clear All</button>
+            </form>
+            <div class="history-actions">
+                <button id="revertLastSpinBtn" type="button" class="secondary">Niet aanwezig (laatste spin terugdraaien)</button>
+            </div>
+            <ul id="nameList" class="name-list" aria-label="Current names"></ul>
+            <details class="import-export">
+                <summary>Import / Export</summary>
+                <div class="row">
+                    <button id="exportBtn" type="button" class="secondary">Export JSON</button>
+                    <label class="file">
+                        <input id="importFile" type="file" accept="application/json">
+                        <span>Import JSON…</span>
+                    </label>
+                </div>
+            </details>
+            <div class="history-actions">
+                <button id="resetPostWinBtn" type="button" class="secondary">Reset spel</button>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="app-footer">
+        <span>Voor vragen: Mail naar <a style="color: orange;" href="mailto:koekenrad@stokperdje.nl">koekenrad@stokperdje.nl</a></span>
+    </footer>
+
+    <!-- Winner Popup Modal -->
+    <div id="winnerModal" class="winner-modal" hidden>
+        <div class="winner-modal-content">
+            <div class="winner-celebration">🎉</div>
+            <h2 class="winner-title">De koekgoden hebben gesproken!</h2>
+            <div class="winner-name" id="winnerName"></div>
+            <div class="winner-message" id="winnerMessage"></div>
+            <div class="winner-actions">
+                <button id="closeWinnerModal" class="primary">Sluiten</button>
+                <button id="revertFromPopupBtn" class="danger">Niet aanwezig (terugdraaien)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth Modal for /kandijkoek -->
+    <div id="authModal" class="auth-modal" hidden aria-modal="true" role="dialog" aria-labelledby="authTitle">
+        <div class="auth-modal-content">
+            <h2 id="authTitle" class="auth-title">Beveiligde pagina</h2>
+            <p class="auth-desc">Voer het wachtwoord in om namen te beheren.</p>
+            <form id="authForm" autocomplete="off">
+                <input id="authInput" type="password" placeholder="Wachtwoord" required>
+                <div class="auth-actions">
+                    <button id="authSubmit" type="submit" class="primary">Ontgrendel</button>
+                    <button id="authCancel" type="button" class="secondary">Annuleren</button>
+                </div>
+                <div id="authError" class="auth-error" aria-live="polite" hidden>Onjuist wachtwoord</div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Cookie Consent Modal -->
+    <div id="cookieModal" class="cookie-modal" aria-modal="true" role="dialog" aria-labelledby="cookieTitle" hidden>
+        <div class="cookie-modal-content">
+            <h2 id="cookieTitle" class="cookie-title">🍪 Cookies zijn essentieel!</h2>
+            <p class="cookie-message">Deze website heeft cookies nodig om te functioneren. Zonder cookies kan het rad niet draaien!</p>
+            <div class="cookie-actions">
+                <button id="acceptCookies" class="primary">Accepteer cookies</button>
+                <button id="rejectCookies" class="secondary">Weiger cookies</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js?v=20251009"></script>
+</body>
+</html>
+
