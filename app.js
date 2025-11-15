@@ -68,18 +68,32 @@ const routes = Array.from(document.querySelectorAll('[data-route]'));
 
 function normalizePath(pathname){
   if (!pathname) return '/';
-  let p = pathname;
+  let p = String(pathname).replace(/\\/g, '/');
   // strip trailing /index.html if directly opening a file like /kandijkoek/index.html
   if (p.endsWith('/index.html')) p = p.slice(0, -('/index.html'.length));
   if (p.length > 1 && p.endsWith('/')) p = p.slice(0, -1);
-  return p || '/';
+
+  const lower = p.toLowerCase();
+  if (lower.includes('/kandijkoek')) return '/kandijkoek';
+  if (lower.includes('/stroopwafel')) return '/stroopwafel';
+
+  if (typeof location !== 'undefined' && location.protocol === 'file:') {
+    return '/';
+  }
+
+  return p.startsWith('/') ? p : `/${p}`;
 }
 
 function navigateTo(pathname){
   const normalized = normalizePath(pathname);
   const match = routes.find(r => r.getAttribute('data-route') === normalized) ? normalized : '/';
-  if (location.pathname !== match){
-    history.pushState({}, '', match);
+  const isFileProtocol = typeof location !== 'undefined' && location.protocol === 'file:';
+  if (!isFileProtocol && location.pathname !== match){
+    try {
+      history.pushState({}, '', match);
+    } catch(error){
+      console.warn('Failed to push history state:', error);
+    }
   }
   updateRoute(match);
 }
@@ -150,13 +164,43 @@ function updateRoute(pathname){
 }
 
 // ----- Simple client-side auth for /kandijkoek -----
-const AUTH_PASSWORD = '2gatenboren';
-const CLEAR_HISTORY_PASSWORD = 'jijmoetdwijlen'; // change this to your preferred password
+const AUTH_PASSWORD_HASH = '2480fa06978bd5a3594997c17afe1f125f145895b40ab7ebe16995a36bdb2cd1';
+const CLEAR_HISTORY_PASSWORD_HASH = 'cb1a72e0e4919345440ea267a8261b15568b42b6a248da0bcc0e0c7c0b6963f4';
+const PASSWORD_HASH_ALGO = 'SHA-256';
 const AUTH_STORAGE_KEY = 'wheel:auth:names';
 const POSTWIN_LOCK_KEY = 'wheel:postwin:lock';
 const AUTO_RESET_KEY = 'wheel:autoReset';
 const COOKIE_CONSENT_KEY = 'wheel:cookieConsent';
 const DEBUG_COOKIE_CONSENT_KEY = 'wheel:debug:cookieConsent';
+
+async function computePasswordHash(value){
+  try{
+    const subtle = (window.crypto || window.msCrypto)?.subtle;
+    if (!subtle) {
+      console.error('Web Crypto API is not available for password hashing.');
+      return null;
+    }
+    if (typeof TextEncoder === 'undefined') {
+      console.error('TextEncoder API is not available for password hashing.');
+      return null;
+    }
+    const encoder = new TextEncoder();
+    const data = encoder.encode(value);
+    const hashBuffer = await subtle.digest(PASSWORD_HASH_ALGO, data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }catch(error){
+    console.error('Failed to compute password hash.', error);
+    return null;
+  }
+}
+
+async function verifyPassword(input, expectedHash){
+  if (typeof expectedHash !== 'string' || !expectedHash.length) return false;
+  const hashed = await computePasswordHash(input);
+  if (!hashed) return null;
+  return hashed === expectedHash;
+}
 
 function isPostWinLocked(){
   try{
@@ -343,15 +387,12 @@ function renderPostWinStateWithoutMessage(){
     if (historyPane){ historyPane.classList.remove('emphasize'); }
   }
 
-  // Update the home page header title when on the home route
-  try{
-    const onHome = normalizePath(location.pathname) === '/';
-    if (onHome && headerTitle){
-      headerTitle.textContent = locked
-        ? 'De koekgoden hebben gesproken...'
-        : 'Vraag de koekgoden om een slachtoffer te kiezen:';
-    }
-  }catch(_e){}
+  // Update the header title
+  if (headerTitle){
+    headerTitle.textContent = locked
+      ? 'De koekgoden hebben gesproken...'
+      : 'Vraag de koekgoden om een slachtoffer te kiezen:';
+  }
 }
 
 function renderPostWinState(){
@@ -401,10 +442,17 @@ function renderPostWinState(){
       if (!isWinnerPopupActive) {
         postWinMessageEl.style.setProperty('display', 'flex', 'important');
         postWinMessageEl.classList.add('visible');
+        // Add class to wheel-canvas for CSS targeting
+        if (wheelCanvasWrap) {
+          wheelCanvasWrap.classList.add('has-message');
+        }
       } else {
         // Ensure post-win message is hidden while popup is active
         postWinMessageEl.style.setProperty('display', 'none', 'important');
         postWinMessageEl.classList.remove('visible');
+        if (wheelCanvasWrap) {
+          wheelCanvasWrap.classList.remove('has-message');
+        }
       }
     }
     if (historyPane){ historyPane.classList.add('emphasize'); }
@@ -422,18 +470,19 @@ function renderPostWinState(){
       postWinMessageEl.classList.remove('visible');
       postWinMessageEl.textContent = '';
     }
+    // Remove message class from wheel-canvas
+    if (wheelCanvasWrap) {
+      wheelCanvasWrap.classList.remove('has-message');
+    }
     if (historyPane){ historyPane.classList.remove('emphasize'); }
   }
 
-  // Update the home page header title when on the home route
-  try{
-    const onHome = normalizePath(location.pathname) === '/';
-    if (onHome && headerTitle){
-      headerTitle.textContent = locked
-        ? 'De koekgoden hebben gesproken...'
-        : 'Vraag de koekgoden om een slachtoffer te kiezen:';
-    }
-  }catch(_e){}
+  // Update the header title
+  if (headerTitle){
+    headerTitle.textContent = locked
+      ? 'De koekgoden hebben gesproken...'
+      : 'Vraag de koekgoden om een slachtoffer te kiezen:';
+  }
 }
 
 function isAuthorizedForNames(){
@@ -455,10 +504,12 @@ function requestNamesAuth(){
   const input = document.getElementById('authInput');
   const cancelBtn = document.getElementById('authCancel');
   const errorEl = document.getElementById('authError');
+  const defaultErrorMessage = errorEl ? errorEl.textContent : '';
   if (!modal || !form || !input) return;
 
   // reset state
   if (errorEl) errorEl.setAttribute('hidden', '');
+  if (errorEl) errorEl.textContent = defaultErrorMessage;
   input.value = '';
   modal.removeAttribute('hidden');
   document.body.classList.add('auth-open');
@@ -490,16 +541,25 @@ function requestNamesAuth(){
   }
   document.addEventListener('keydown', onEsc);
 
-  form.onsubmit = (e) => {
+  form.onsubmit = async (e) => {
     e.preventDefault();
     const value = input.value || '';
-    if (value === AUTH_PASSWORD){
+    const verificationResult = await verifyPassword(value, AUTH_PASSWORD_HASH);
+    if (verificationResult === true){
       setAuthorizedForNames(true);
       closeAuth();
       // Immediately show names route without needing a refresh
       updateRoute('/kandijkoek');
+    } else if (verificationResult === null){
+      if (errorEl) {
+        errorEl.textContent = 'Beveiligde verificatie wordt niet ondersteund in deze browser.';
+        errorEl.removeAttribute('hidden');
+      }
     } else {
-      if (errorEl) errorEl.removeAttribute('hidden');
+      if (errorEl){
+        errorEl.textContent = defaultErrorMessage || 'Onjuist wachtwoord';
+        errorEl.removeAttribute('hidden');
+      }
       input.select();
     }
   };
@@ -1474,12 +1534,24 @@ function renderList(){
   }
 }
 
+function removeHistoryEntry(index){
+  if (!Number.isInteger(index) || index < 0 || index >= history.length) {
+    return;
+  }
+  const [removed] = history.splice(index, 1);
+  saveHistory();
+  renderHistory();
+  renderFullHistory();
+  console.log('History entry removed:', removed);
+}
+
 function renderHistory(){
   if (!historyList) return;
   historyList.innerHTML = "";
   // Show only the most recent 10 while keeping full history in storage
   const toShow = history.slice(0, 10);
-  toShow.forEach(item => {
+  toShow.forEach((item, index) => {
+    const actualIndex = index;
     const li = document.createElement("li");
     const who = document.createElement("span");
     who.className = "who";
@@ -1488,7 +1560,7 @@ function renderHistory(){
     when.className = "when";
     try{
       const d = new Date(item.when);
-      when.textContent = d.toLocaleString();
+      when.textContent = d.toLocaleDateString('nl-NL', { year: 'numeric', month: '2-digit', day: '2-digit' });
     }catch(_e){ when.textContent = ""; }
     li.appendChild(who);
     li.appendChild(when);
@@ -1499,7 +1571,7 @@ function renderHistory(){
 function renderFullHistory(){
   if (!historyListFull) return;
   historyListFull.innerHTML = "";
-  history.forEach(item => {
+  history.forEach((item, index) => {
     const li = document.createElement("li");
     const who = document.createElement("span");
     who.className = "who";
@@ -1507,11 +1579,22 @@ function renderFullHistory(){
     const when = document.createElement("span");
     when.className = "when";
     try{
-      const d = new Date(item.when);
-      when.textContent = d.toLocaleString();
+      const d = new Date((item.when));
+      when.textContent = d.toLocaleDateString('nl-NL', { year: 'numeric', month: '2-digit', day: '2-digit' });
     }catch(_e){ when.textContent = ""; }
     li.appendChild(who);
     li.appendChild(when);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "danger history-remove";
+    removeBtn.textContent = "Verwijder";
+    removeBtn.addEventListener("click", () => {
+      if (!confirm(`Weet je zeker dat je ${item.who} (${new Date(item.when).toLocaleString()}) wilt verwijderen?`)) {
+        return;
+      }
+      removeHistoryEntry(index);
+    });
+    li.appendChild(removeBtn);
     historyListFull.appendChild(li);
   });
 }
@@ -1665,8 +1748,37 @@ if (spinButton) {
 
 if (randomKoekBtn){
   randomKoekBtn.addEventListener('click', () => {
+    // List of all cookie pages (including error.html)
+    const cookiePages = [
+      'bitterkoekjes.html',
+      'bokkepootjes.html',
+      'cafenoir.html',
+      'chocolatechipcookie.html',
+      'error.html',
+      'gevuldekoeken.html',
+      'janhagel.html',
+      'jodenkoeken.html',
+      'kandijkoek.html',
+      'kletskoppen.html',
+      'kokoskoekjes.html',
+      'kokosmakroon.html',
+      'langevinger.html',
+      'liga.html',
+      'mariabiscuit.html',
+      'scholiertjes.html',
+      'speculaas.html',
+      'speculaasbrokken.html',
+      'sprenkeltjes.html',
+      'spritsen.html',
+      'stroopwafel.html'
+    ];
+    
+    // Select a random page
+    const randomIndex = Math.floor(Math.random() * cookiePages.length);
+    const randomPage = cookiePages[randomIndex];
+    
     // Navigate to the random koek page
-    window.location.href = 'Random_Koeken_Pagina/stroopwafel.html';
+    window.location.href = `Random_Koeken_Pagina/${randomPage}`;
   });
 }
 
@@ -1779,6 +1891,10 @@ function showClearHistoryAuth(){
   if (modal && input && error) {
     modal.removeAttribute('hidden');
     input.value = '';
+    if (!error.dataset.defaultMessage){
+      error.dataset.defaultMessage = error.textContent || '';
+    }
+    error.textContent = error.dataset.defaultMessage;
     error.setAttribute('hidden', '');
     input.focus();
   }
@@ -1817,7 +1933,7 @@ if (resetPostWinBtn){
   resetPostWinBtn.addEventListener('click', () => {
     clearPostWinLock();
     // Navigate home so users can spin again and see the wheel return
-    navigateTo('/');
+    navigateTo('/kandijkoek');
   });
 }
 
@@ -1912,14 +2028,32 @@ const clearHistoryAuthCancel = document.getElementById('clearHistoryAuthCancel')
 const clearHistoryAuthError = document.getElementById('clearHistoryAuthError');
 
 if (clearHistoryAuthForm) {
-  clearHistoryAuthForm.addEventListener('submit', (e) => {
+  const defaultClearHistoryErrorMessage = clearHistoryAuthError ? clearHistoryAuthError.textContent : '';
+  clearHistoryAuthForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const password = clearHistoryAuthInput.value.trim();
-    
-    if (password === CLEAR_HISTORY_PASSWORD) {
+    if (clearHistoryAuthError){
+      const defaultMsg = clearHistoryAuthError.dataset?.defaultMessage ?? defaultClearHistoryErrorMessage;
+      clearHistoryAuthError.textContent = defaultMsg;
+      clearHistoryAuthError.setAttribute('hidden', '');
+    }
+
+    const verificationResult = await verifyPassword(password, CLEAR_HISTORY_PASSWORD_HASH);
+    if (verificationResult === true) {
       clearHistoryWithAuth();
+    } else if (verificationResult === null) {
+      if (clearHistoryAuthError) {
+        clearHistoryAuthError.textContent = 'Beveiligde verificatie wordt niet ondersteund in deze browser.';
+        clearHistoryAuthError.removeAttribute('hidden');
+      }
+      clearHistoryAuthInput.value = '';
+      clearHistoryAuthInput.focus();
     } else {
-      clearHistoryAuthError.removeAttribute('hidden');
+      if (clearHistoryAuthError){
+        const defaultMsg = clearHistoryAuthError.dataset?.defaultMessage ?? defaultClearHistoryErrorMessage;
+        clearHistoryAuthError.textContent = defaultMsg || 'Onjuist wachtwoord';
+        clearHistoryAuthError.removeAttribute('hidden');
+      }
       clearHistoryAuthInput.value = '';
       clearHistoryAuthInput.focus();
     }
