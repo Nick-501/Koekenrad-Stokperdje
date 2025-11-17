@@ -9,9 +9,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="../styles.css?v=20251009">
 </head>
-<body>
+<body class="app-loading">
     <audio id="bgAudio" src="../tune/theme.m4a" preload="auto" loop muted playsinline></audio>
     <button id="muteBtn" class="secondary mute-btn" aria-pressed="false">🔊</button>
+    <div id="appLoadingOverlay" class="app-loading-overlay" role="status" aria-live="polite">
+        <div class="spinner"></div>
+        <p>Koekgoden ontwaken…</p>
+    </div>
     <header class="app-header">
         <h1>Klusclub leden:</h1>
     </header>
@@ -150,6 +154,31 @@
             </div>
         </div>
     </div>
+
+    <!-- Firebase SDK (compat builds to match main site setup) -->
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore-compat.js"></script>
+    <script>
+        (function(){
+            const firebaseConfig = {
+                apiKey: "AIzaSyDGgzBRzSRraV8DV_78NZ_NkJayAeP8cp8",
+                authDomain: "koekenrad.firebaseapp.com",
+                projectId: "koekenrad",
+                storageBucket: "koekenrad.firebasestorage.app",
+                messagingSenderId: "554228525270",
+                appId: "1:554228525270:web:7add80adc6df0ca1bb4177"
+            };
+            try {
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfig);
+                }
+                window.firebaseApp = firebase;
+                window.firestoreDb = firebase.firestore();
+            } catch(error) {
+                console.error('Failed to initialize Firebase on admin page:', error);
+            }
+        })();
+    </script>
 
     <script src="../app.js?v=20251009"></script>
 </body>

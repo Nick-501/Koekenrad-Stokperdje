@@ -1,4 +1,4 @@
-const DEFAULT_NAMES = ["Alice","Bob","Charlie","Dana","Eli","Fatima","Grace","Hugo"]; // starter sample
+const DEFAULT_NAMES = ["Voeg leden toe"]; // starter sample
 
 const canvas = document.getElementById("wheelCanvas");
 const ctx = canvas ? canvas.getContext("2d") : null;
@@ -90,7 +90,7 @@ function navigateTo(pathname){
   const isFileProtocol = typeof location !== 'undefined' && location.protocol === 'file:';
   if (!isFileProtocol && location.pathname !== match){
     try {
-      history.pushState({}, '', match);
+      window.history.pushState({}, '', match);
     } catch(error){
       console.warn('Failed to push history state:', error);
     }
@@ -173,6 +173,248 @@ const AUTO_RESET_KEY = 'wheel:autoReset';
 const COOKIE_CONSENT_KEY = 'wheel:cookieConsent';
 const DEBUG_COOKIE_CONSENT_KEY = 'wheel:debug:cookieConsent';
 
+const DEFAULT_AUTO_RESET_SETTINGS = { enabled: false, day: 1, time: "13:00" };
+let lockStateCache = loadLockStateFromStorage();
+let autoResetSettings = readAutoResetSettingsFromStorage();
+let debugCookieConsentState = loadDebugCookieConsentFromStorage();
+let appDataReady = false;
+let appReadyTimer = null;
+const APP_READY_TIMEOUT_MS = 2000;
+
+if (typeof window !== 'undefined'){
+  appReadyTimer = window.setTimeout(() => markAppDataReady('timeout'), APP_READY_TIMEOUT_MS);
+}
+let firestoreUnsubscribe = null;
+let cachedFirestoreDb = typeof window !== 'undefined' ? window.firestoreDb ?? null : null;
+let cachedFirestoreFieldValue = null;
+
+function getFirebaseNamespace(){
+  if (typeof firebase !== 'undefined') return firebase;
+  if (typeof window !== 'undefined' && window.firebaseApp) return window.firebaseApp;
+  return null;
+}
+
+function getFirestoreDb(){
+  if (cachedFirestoreDb) return cachedFirestoreDb;
+  if (typeof window === 'undefined') return null;
+  if (window.firestoreDb){
+    cachedFirestoreDb = window.firestoreDb;
+    return cachedFirestoreDb;
+  }
+  const namespace = getFirebaseNamespace();
+  if (!namespace || typeof namespace.firestore !== 'function') return null;
+  try{
+    cachedFirestoreDb = namespace.firestore();
+    window.firestoreDb = cachedFirestoreDb;
+    return cachedFirestoreDb;
+  }catch(error){
+    console.error('Failed to initialize Firestore instance:', error);
+    return null;
+  }
+}
+
+function getFirestoreFieldValue(){
+  if (cachedFirestoreFieldValue) return cachedFirestoreFieldValue;
+  const namespace = getFirebaseNamespace();
+  if (namespace?.firestore?.FieldValue){
+    cachedFirestoreFieldValue = namespace.firestore.FieldValue;
+  }
+  return cachedFirestoreFieldValue;
+}
+
+function getStateDocRef(){
+  const db = getFirestoreDb();
+  return db ? db.collection('koekenrad').doc('state') : null;
+}
+
+function markAppDataReady(reason){
+  if (appDataReady) return;
+  appDataReady = true;
+  if (appReadyTimer){
+    clearTimeout(appReadyTimer);
+    appReadyTimer = null;
+  }
+  try{
+    const overlay = document.getElementById('appLoadingOverlay');
+    if (overlay){
+      overlay.setAttribute('hidden', '');
+    }
+    document.body?.classList.remove('app-loading');
+  }catch(_e){}
+  console.log('App data ready:', reason);
+}
+
+function loadLockStateFromStorage(){
+  try{
+    const raw = localStorage.getItem(POSTWIN_LOCK_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(_e){
+    return null;
+  }
+}
+
+function readAutoResetSettingsFromStorage(){
+  try{
+    const saved = localStorage.getItem(AUTO_RESET_KEY);
+    if (saved){
+      const parsed = JSON.parse(saved);
+      return normalizeAutoResetSettings(parsed);
+    }
+  }catch(_e){}
+  return { ...DEFAULT_AUTO_RESET_SETTINGS };
+}
+
+function loadDebugCookieConsentFromStorage(){
+  try{
+    const stored = localStorage.getItem(DEBUG_COOKIE_CONSENT_KEY);
+    return stored === 'enabled';
+  }catch(_e){ return false; }
+}
+
+function normalizeAutoResetSettings(value){
+  const normalized = { ...DEFAULT_AUTO_RESET_SETTINGS };
+  if (value && typeof value === 'object'){
+    if (typeof value.enabled === 'boolean') normalized.enabled = value.enabled;
+    if (typeof value.day === 'number' && value.day >= 0 && value.day <= 6) normalized.day = value.day;
+    if (typeof value.time === 'string' && /^\d{1,2}:\d{2}$/.test(value.time)) normalized.time = value.time;
+  }
+  return normalized;
+}
+
+function writeLocalStorageSlice(partial){
+  if (typeof localStorage === 'undefined') return;
+  try{
+    if ('names' in partial){
+      localStorage.setItem("wheel:names", JSON.stringify(partial.names ?? []));
+    }
+  }catch(_e){}
+  try{
+    if ('history' in partial){
+      localStorage.setItem("wheel:history", JSON.stringify(partial.history ?? []));
+    }
+  }catch(_e){}
+  try{
+    if ('bans' in partial){
+      localStorage.setItem("wheel:bans", JSON.stringify(partial.bans ?? []));
+    }
+  }catch(_e){}
+  try{
+    if ('autoReset' in partial){
+      localStorage.setItem(AUTO_RESET_KEY, JSON.stringify(partial.autoReset ?? DEFAULT_AUTO_RESET_SETTINGS));
+    }
+  }catch(_e){}
+  try{
+    if ('debugCookieConsent' in partial){
+      localStorage.setItem(
+        DEBUG_COOKIE_CONSENT_KEY,
+        partial.debugCookieConsent ? 'enabled' : 'disabled'
+      );
+    }
+  }catch(_e){}
+  try{
+    if ('lock' in partial){
+      if (partial.lock){
+        localStorage.setItem(POSTWIN_LOCK_KEY, JSON.stringify(partial.lock));
+      } else {
+        localStorage.removeItem(POSTWIN_LOCK_KEY);
+      }
+    }
+  }catch(_e){}
+}
+
+function persistState(partial){
+  writeLocalStorageSlice(partial);
+  const docRef = getStateDocRef();
+  if (!docRef) {
+    console.warn('Firestore not ready; skipping state sync for now.', partial);
+    return;
+  }
+  const payload = { ...partial };
+  const fieldValue = getFirestoreFieldValue();
+  if (fieldValue?.serverTimestamp){
+    payload.updatedAt = fieldValue.serverTimestamp();
+  } else {
+    payload.updatedAt = Date.now();
+  }
+  docRef.set(payload, { merge: true }).catch(error => {
+    console.error('Failed to update Firestore state:', error);
+  });
+}
+
+function applyRemoteState(data){
+  if (!data) return;
+  const next = {
+    names: Array.isArray(data.names) ? data.names.filter(n => typeof n === 'string' && n.trim().length) : [...DEFAULT_NAMES],
+    history: Array.isArray(data.history) ? data.history.filter(entry => entry && typeof entry.who === 'string' && typeof entry.when === 'number') : [],
+    bans: Array.isArray(data.bans) ? data.bans.filter(b => b && typeof b.name === 'string' && Number.isFinite(b.remaining)) : [],
+    lock: data.lock && typeof data.lock === 'object' ? data.lock : null,
+    autoReset: normalizeAutoResetSettings(data.autoReset),
+    debugCookieConsent: typeof data.debugCookieConsent === 'boolean'
+      ? data.debugCookieConsent
+      : debugCookieConsentState
+  };
+
+  names = next.names.length ? next.names : [...DEFAULT_NAMES];
+  history = next.history;
+  bans = next.bans;
+  lockStateCache = next.lock;
+  autoResetSettings = next.autoReset;
+  debugCookieConsentState = Boolean(next.debugCookieConsent);
+
+  writeLocalStorageSlice({
+    names,
+    history,
+    bans,
+    lock: lockStateCache,
+    autoReset: autoResetSettings,
+    debugCookieConsent: debugCookieConsentState
+  });
+
+  applyAutoResetSettingsToUI();
+  renderList();
+  if (canvas && ctx) drawWheel().catch(console.error);
+  renderHistory();
+  renderFullHistory();
+  renderPostWinState();
+  updateAutoResetStatus();
+  markAppDataReady('firestore');
+}
+
+function startFirestoreSync(){
+  if (typeof window === 'undefined') return;
+  if (firestoreUnsubscribe) return;
+  const docRef = getStateDocRef();
+  if (!docRef){
+    console.warn('Firestore not initialized yet; retrying sync shortly...');
+    setTimeout(startFirestoreSync, 1000);
+    return;
+  }
+
+  docRef.get().then(snap => {
+    if (!snap.exists){
+      persistState({
+        names,
+        history,
+        bans,
+        lock: lockStateCache,
+        autoReset: autoResetSettings,
+        debugCookieConsent: debugCookieConsentState
+      });
+    } else {
+      applyRemoteState(snap.data());
+    }
+  }).catch(error => {
+    console.error('Failed to load initial Firestore state:', error);
+  });
+
+  firestoreUnsubscribe = docRef.onSnapshot((snap) => {
+    if (!snap.exists) return;
+    applyRemoteState(snap.data());
+  }, (error) => {
+    console.error('Firestore snapshot error:', error);
+  });
+}
+
 async function computePasswordHash(value){
   try{
     const subtle = (window.crypto || window.msCrypto)?.subtle;
@@ -203,65 +445,55 @@ async function verifyPassword(input, expectedHash){
 }
 
 function isPostWinLocked(){
-  try{
-    const v = localStorage.getItem(POSTWIN_LOCK_KEY);
-    return Boolean(v);
-  }catch(_e){ return false; }
+  return Boolean(lockStateCache);
 }
 
 function setPostWinLock(winner){
-  try{
-    // Get random winner message
-    const winnerMessage = getRandomWinnerMessage(winner);
-    const payload = { 
-      winner: String(winner || ''), 
-      message: winnerMessage,
-      at: Date.now() 
-    };
-    localStorage.setItem(POSTWIN_LOCK_KEY, JSON.stringify(payload));
-    
-    // Update suggestions button with winner name
-    if (suggestionsWinnerName) {
-      suggestionsWinnerName.textContent = winner || '';
-    }
-  }catch(_e){}
+  // Get random winner message
+  const winnerMessage = getRandomWinnerMessage(winner);
+  const payload = { 
+    winner: String(winner || ''), 
+    message: winnerMessage,
+    at: Date.now() 
+  };
+  lockStateCache = payload;
+  persistState({ lock: payload });
+  
+  // Update suggestions button with winner name
+  if (suggestionsWinnerName) {
+    suggestionsWinnerName.textContent = winner || '';
+  }
   // Also reflect winner in URL hash so other devices can see it when opening the link
   try{
     const encoded = encodeURIComponent(String(winner || ''));
     const newHash = `#winner=${encoded}`;
     if (location.hash !== newHash){
-      history.replaceState({}, '', location.pathname + location.search + newHash);
+      window.history.replaceState({}, '', location.pathname + location.search + newHash);
     }
   }catch(_e){}
 }
 
 function clearPostWinLock(){
-  try{ localStorage.removeItem(POSTWIN_LOCK_KEY); }catch(_e){}
+  lockStateCache = null;
+  persistState({ lock: null });
+  if (suggestionsWinnerName) {
+    suggestionsWinnerName.textContent = '';
+  }
   renderPostWinState();
   // Remove winner hash from URL
   try{
     if (location.hash){
-      history.replaceState({}, '', location.pathname + location.search);
+      window.history.replaceState({}, '', location.pathname + location.search);
     }
   }catch(_e){}
 }
 
 function getLockedWinner(){
-  try{
-    const v = localStorage.getItem(POSTWIN_LOCK_KEY);
-    if (!v) return '';
-    const obj = JSON.parse(v);
-    return typeof obj?.winner === 'string' ? obj.winner : '';
-  }catch(_e){ return ''; }
+  return typeof lockStateCache?.winner === 'string' ? lockStateCache.winner : '';
 }
 
 function getLockedMessage(){
-  try{
-    const v = localStorage.getItem(POSTWIN_LOCK_KEY);
-    if (!v) return '';
-    const obj = JSON.parse(v);
-    return typeof obj?.message === 'string' ? obj.message : '';
-  }catch(_e){ return ''; }
+  return typeof lockStateCache?.message === 'string' ? lockStateCache.message : '';
 }
 
 // Cookie consent functions
@@ -276,6 +508,15 @@ function setCookieConsent(accepted){
   try{
     localStorage.setItem(COOKIE_CONSENT_KEY, accepted ? 'accepted' : 'rejected');
   }catch(_e){}
+}
+
+function clearCookieConsent(){
+  try{
+    localStorage.removeItem(COOKIE_CONSENT_KEY);
+    localStorage.removeItem(DEBUG_COOKIE_CONSENT_KEY);
+  }catch(_e){}
+  debugCookieConsentState = false;
+  persistState({ debugCookieConsent: debugCookieConsentState });
 }
 
 function showCookieModal(){
@@ -315,23 +556,18 @@ function showBrokenPage(){
 
 // Debug functions for cookie consent (moved to global scope)
 function getDebugCookieConsent(){
-  try{
-    const debug = localStorage.getItem(DEBUG_COOKIE_CONSENT_KEY);
-    return debug === 'enabled';
-  }catch(_e){ return false; }
+  return Boolean(debugCookieConsentState);
 }
 
 function setDebugCookieConsent(enabled){
-  try{
-    localStorage.setItem(DEBUG_COOKIE_CONSENT_KEY, enabled ? 'enabled' : 'disabled');
-  }catch(_e){}
+  debugCookieConsentState = Boolean(enabled);
+  persistState({ debugCookieConsent: debugCookieConsentState });
 }
 
 function clearCookieConsent(){
-  try{
-    localStorage.removeItem(COOKIE_CONSENT_KEY);
-    localStorage.removeItem(DEBUG_COOKIE_CONSENT_KEY);
-  }catch(_e){}
+  cookieConsentState = null;
+  persistState({ cookieConsent: null });
+  try{ localStorage.removeItem(DEBUG_COOKIE_CONSENT_KEY); }catch(_e){}
 }
 
 function parseWinnerFromHash(){
@@ -672,7 +908,7 @@ function loadNames(){
 }
 
 function saveNames(){
-  localStorage.setItem("wheel:names", JSON.stringify(names));
+  persistState({ names });
 }
 
 function loadAngle(){
@@ -687,7 +923,7 @@ function saveAngle(){
 
 function capturePreSpinSnapshot(){
   try{
-    const lockRaw = localStorage.getItem(POSTWIN_LOCK_KEY);
+    const lockRaw = lockStateCache ? JSON.stringify(lockStateCache) : null;
     const snapshot = {
       angle: currentAngle,
       bans: JSON.parse(JSON.stringify(bans || [])),
@@ -743,11 +979,18 @@ function revertLastSpin(){
   try{
     const hadLock = lastSpinSnapshot.lock != null && lastSpinSnapshot.lock !== undefined;
     if (hadLock){
-      localStorage.setItem(POSTWIN_LOCK_KEY, lastSpinSnapshot.lock);
+      try{
+        lockStateCache = JSON.parse(lastSpinSnapshot.lock);
+      }catch(_e){
+        lockStateCache = null;
+      }
+      persistState({ lock: lockStateCache });
     } else {
       clearPostWinLock();
     }
-  }catch(_e){ clearPostWinLock(); }
+  }catch(_e){ 
+    clearPostWinLock(); 
+  }
   // Close winner modal if open
   if (winnerModal && !winnerModal.hasAttribute('hidden')){
     winnerModal.setAttribute('hidden', '');
@@ -776,7 +1019,7 @@ function loadHistory(){
 }
 
 function saveHistory(){
-  localStorage.setItem("wheel:history", JSON.stringify(history));
+  persistState({ history });
 }
 
 function loadBans(){
@@ -789,7 +1032,7 @@ function loadBans(){
 }
 
 function saveBans(){
-  localStorage.setItem("wheel:bans", JSON.stringify(bans));
+  persistState({ bans });
 }
 
 // Winner messages functions
@@ -833,28 +1076,20 @@ function getRandomWinnerMessage(winnerName){
 
 // Auto-reset functions
 function loadAutoResetSettings(){
-  try{
-    const saved = localStorage.getItem(AUTO_RESET_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && typeof parsed.enabled === 'boolean' && 
-          typeof parsed.day === 'number' && typeof parsed.time === 'string') {
-        return parsed;
-      }
-    }
-  }catch(_e){}
-  return { enabled: false, day: 1, time: "13:00" }; // default: Monday 13:00
+  return { ...autoResetSettings };
 }
 
 function saveAutoResetSettings(settings){
-  try{
-    localStorage.setItem(AUTO_RESET_KEY, JSON.stringify(settings));
-  }catch(_e){}
+  const normalized = normalizeAutoResetSettings(settings);
+  autoResetSettings = normalized;
+  persistState({ autoReset: normalized });
+  updateAutoResetStatus();
+  applyAutoResetSettingsToUI();
 }
 
 function updateAutoResetStatus(){
   if (!autoResetStatus) return;
-  const settings = loadAutoResetSettings();
+  const settings = autoResetSettings;
   if (!settings.enabled) {
     autoResetStatus.textContent = "Automatische reset is uitgeschakeld";
     return;
@@ -933,7 +1168,7 @@ function performAutoReset(){
 }
 
 function checkAutoReset(){
-  const settings = loadAutoResetSettings();
+  const settings = autoResetSettings;
   if (!settings.enabled) return;
   
   const now = new Date();
@@ -1937,13 +2172,18 @@ if (resetPostWinBtn){
   });
 }
 
+function applyAutoResetSettingsToUI(){
+  if (!autoResetToggle || !autoResetDay || !autoResetTime) return;
+  const settings = autoResetSettings || DEFAULT_AUTO_RESET_SETTINGS;
+  autoResetToggle.checked = Boolean(settings.enabled);
+  autoResetDay.value = String(settings.day ?? DEFAULT_AUTO_RESET_SETTINGS.day);
+  autoResetTime.value = settings.time ?? DEFAULT_AUTO_RESET_SETTINGS.time;
+}
+
 // Auto-reset controls
 if (autoResetToggle && autoResetDay && autoResetTime) {
   // Load and apply saved settings
-  const settings = loadAutoResetSettings();
-  autoResetToggle.checked = settings.enabled;
-  autoResetDay.value = settings.day;
-  autoResetTime.value = settings.time;
+  applyAutoResetSettingsToUI();
   
   // Update status display
   updateAutoResetStatus();
@@ -1956,7 +2196,6 @@ if (autoResetToggle && autoResetDay && autoResetTime) {
       time: autoResetTime.value
     };
     saveAutoResetSettings(newSettings);
-    updateAutoResetStatus();
   });
   
   // Day/time change handlers
@@ -1968,7 +2207,6 @@ if (autoResetToggle && autoResetDay && autoResetTime) {
         time: autoResetTime.value
       };
       saveAutoResetSettings(newSettings);
-      updateAutoResetStatus();
     }
   });
   
@@ -1980,7 +2218,6 @@ if (autoResetToggle && autoResetDay && autoResetTime) {
         time: autoResetTime.value
       };
       saveAutoResetSettings(newSettings);
-      updateAutoResetStatus();
     }
   });
 }
@@ -2111,6 +2348,7 @@ if (!effectiveConsent) {
 }
 
 // Always initialize core UI so lists/history are not empty on any route
+startFirestoreSync();
 renderList();
 if (canvas && ctx) drawWheel().catch(console.error);
 renderHistory();
