@@ -152,6 +152,11 @@ function updateRoute(pathname){
     }
   });
   
+  const routeName = activePath === '/' ? 'home' : activePath.replace(/^\//, '') || 'home';
+  if (document?.body){
+    document.body.setAttribute('data-route', routeName);
+  }
+  
   // redraw wheel when showing home route to ensure crisp canvas
   if (activePath === '/' && canvas && ctx) {
     drawWheel().catch(console.error);
@@ -1658,6 +1663,7 @@ function spin(){
         saveAngle();
         if (winner){
           // Immediately set lock state to prevent refresh abuse
+          isWinnerPopupActive = true;
           setPostWinLock(winner);
           // Don't update UI yet - keep everything as is until popup closes
           
