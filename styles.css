@@ -5,7 +5,7 @@ body{min-height:100vh;display:flex;flex-direction:column}
 .app-footer{margin-top:auto}
 :root{
   /* Orange / Black / White palette */
-  --bg:#0b0b0b; /* near-black */
+  --bg:#00dc12; /* near-black */
   --panel:#111111; /* deep black */
   --muted:#c9c9c9; /* light gray */
   --text:#ffffff; /* white */
