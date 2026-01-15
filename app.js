@@ -179,6 +179,7 @@ const COOKIE_CONSENT_KEY = 'wheel:cookieConsent';
 const DEBUG_COOKIE_CONSENT_KEY = 'wheel:debug:cookieConsent';
 
 const DEFAULT_AUTO_RESET_SETTINGS = { enabled: false, day: 1, time: "13:00" };
+const LAST_AUTO_RESET_KEY = 'wheel:lastAutoReset';
 let lockStateCache = loadLockStateFromStorage();
 let autoResetSettings = readAutoResetSettingsFromStorage();
 let debugCookieConsentState = loadDebugCookieConsentFromStorage();
@@ -1155,7 +1156,26 @@ function getNextResetTime(targetDay, targetTime){
 }
 
 function performAutoReset(){
+  // Check if we've reset recently (within last 5 minutes) to prevent spam
+  try {
+    const lastReset = localStorage.getItem(LAST_AUTO_RESET_KEY);
+    if (lastReset) {
+      const lastResetTime = parseInt(lastReset, 10);
+      const timeSinceLastReset = Date.now() - lastResetTime;
+      if (timeSinceLastReset < 300000) { // 5 minutes
+        console.log('Auto-reset skipped: already reset recently');
+        return;
+      }
+    }
+  } catch (_e) {}
+  
   console.log('Performing automatic reset...');
+  
+  // Store the reset timestamp
+  try {
+    localStorage.setItem(LAST_AUTO_RESET_KEY, String(Date.now()));
+  } catch (_e) {}
+  
   // Clear post-win lock
   clearPostWinLock();
   // Reset bans
@@ -1177,19 +1197,60 @@ function checkAutoReset(){
   if (!settings.enabled) return;
   
   const now = new Date();
-  const nextReset = getNextResetTime(settings.day, settings.time);
-  const timeUntil = nextReset - now;
+  const [hours, minutes] = settings.time.split(':').map(Number);
+  const currentDay = now.getDay();
+  
+  // Calculate the scheduled reset time for the current occurrence
+  const scheduledReset = new Date(now);
+  
+  // Determine if we need to look at this week or next week
+  let daysToAdd = 0;
+  if (currentDay < settings.day) {
+    // Target day is later this week
+    daysToAdd = settings.day - currentDay;
+  } else if (currentDay > settings.day) {
+    // Target day was earlier this week, so next occurrence is next week
+    daysToAdd = 7 - (currentDay - settings.day);
+  } else {
+    // Same day - check if time has passed today
+    scheduledReset.setHours(hours, minutes, 0, 0);
+    if (now < scheduledReset) {
+      // Time hasn't passed yet today
+      daysToAdd = 0;
+    } else {
+      // Time has passed today, so next reset is next week
+      daysToAdd = 7;
+    }
+  }
+  
+  // Adjust to the target day and time
+  if (daysToAdd > 0) {
+    scheduledReset.setDate(now.getDate() + daysToAdd);
+  }
+  scheduledReset.setHours(hours, minutes, 0, 0);
+  
+  // Calculate time differences
+  const timeUntil = scheduledReset - now;
+  const timeSince = now - scheduledReset;
   
   console.log('Auto-reset check:', {
     now: now.toLocaleString(),
     targetDay: settings.day,
     targetTime: settings.time,
-    nextReset: nextReset.toLocaleString(),
-    timeUntil: Math.round(timeUntil / 1000) + 's'
+    scheduledReset: scheduledReset.toLocaleString(),
+    timeUntil: Math.round(timeUntil / 1000) + 's',
+    timeSince: Math.round(timeSince / 1000) + 's'
   });
   
-  // If it's time to reset (within 1 minute tolerance)
-  if (timeUntil <= 60000 && timeUntil > -60000) {
+  // Trigger if:
+  // 1. Within 1 minute before scheduled time (timeUntil between 0 and 60000ms)
+  // 2. Within 1 minute after scheduled time (timeUntil between -60000 and 0)
+  // 3. Up to 1 hour after scheduled time (for cases where page was closed/background)
+  // This handles cases where the page was closed/background during the reset window
+  const shouldTrigger = (timeUntil <= 60000 && timeUntil > -60000) || 
+                        (timeSince >= 0 && timeSince <= 3600000);
+  
+  if (shouldTrigger) {
     console.log('Triggering auto-reset!');
     performAutoReset();
   }
@@ -2361,11 +2422,49 @@ renderHistory();
 renderFullHistory();
 loadWinnerMessages();
 
-// Initialize auto-reset checker
-setInterval(() => {
+// Initialize auto-reset checker with better handling for hosted sites
+let autoResetInterval = null;
+
+function startAutoResetChecker() {
+  // Clear existing interval if any
+  if (autoResetInterval) {
+    clearInterval(autoResetInterval);
+  }
+  
+  // Check immediately
   checkAutoReset();
   updateAutoResetStatus();
-}, 10000); // Check every 10 seconds for testing
+  
+  // Check every 10 seconds
+  autoResetInterval = setInterval(() => {
+    checkAutoReset();
+    updateAutoResetStatus();
+  }, 10000);
+}
+
+// Start the checker
+startAutoResetChecker();
+
+// Check immediately when page becomes visible (handles tab switching and window focus)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    // Page became visible - check immediately
+    checkAutoReset();
+    updateAutoResetStatus();
+  }
+});
+
+// Also check when window gains focus
+window.addEventListener('focus', () => {
+  checkAutoReset();
+  updateAutoResetStatus();
+});
+
+// Check when the page loads (in case it was closed during reset time)
+window.addEventListener('load', () => {
+  checkAutoReset();
+  updateAutoResetStatus();
+});
 
 // Initialize route based on current URL. If served as a static file without server routing,
 // direct navigation to /kandijkoek may 404; when loaded from root or in /kandijkoek/ folder, it works.
